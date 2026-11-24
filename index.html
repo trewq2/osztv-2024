@@ -76,7 +76,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="print-sheet" class="print-sheet" aria-hidden="true"></div>
 <script>
-/* OSZTV 2024 – önálló, GitHub Pages-re telepíthető kliensoldali felmérő. */
+/* OSZTV 2024 – eredményküldés javítva (V3 – mindig HTML form POST), 2026.11.24. */
 (() => {
   'use strict';
   const DATA = window.OSZTV_EXAM;
@@ -149,7 +149,10 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
   function header(status='ONLINE FELMÉRŐ') {
     return `<header class="topbar"><div class="brand"><div class="brand-logo">50</div><div><div class="brand-name">OSZTV <span style="color:var(--cyan)">2024</span></div><div class="brand-tagline">Informatikai tudáspróba</div></div></div><div class="top-pill"><span class="dot"></span>${escapeHTML(status)}</div></header>`;
   }
-  const apiUrl = String(window.OSZTV_API_URL||'').trim();
+  // A Workspace saját /a/macros/domain/s/ címe egyes böngészőkben a POST-ot
+  // bejelentkezési oldalra irányíthatja. Ugyanannak a telepítésnek a publikus útját használjuk.
+  const configuredApiUrl = String(window.OSZTV_API_URL||'').trim();
+  const apiUrl = configuredApiUrl.replace(/^https:\/\/script\.google\.com\/a\/macros\/[^/?#]+\/s\//, 'https://script.google.com/macros/s/');
   const apiReady = /^https:\/\/script\.google\.com\/(?:macros\/s|a\/macros\/[^/?#]+\/s)\/[^/?#]+\/exec(?:\?[^#]*)?$/.test(apiUrl);
   function updateSyncStatus(){
     const el=$('syncStatus'); if(!el||!state)return;
@@ -181,27 +184,48 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
     });
   }
   let syncingSessionId = '';
+  let lastPostError = '';
+  function submitResultForm(payload){
+    // Böngészős navigációs POST, rejtett iframe-ben. A tanuló nem hagyja el a tesztet.
+    let frame=document.getElementById('osztvSubmissionFrame');
+    if(!frame){
+      frame=document.createElement('iframe');
+      frame.id='osztvSubmissionFrame';
+      frame.name='osztvSubmissionFrame';
+      frame.title='Google Táblázatos eredményküldés';
+      frame.style.display='none';
+      document.body.appendChild(frame);
+    }
+    const form=document.createElement('form');
+    form.action=apiUrl;
+    form.method='POST';
+    form.enctype='application/x-www-form-urlencoded';
+    form.target=frame.name;
+    form.style.display='none';
+    const input=document.createElement('input');
+    input.type='hidden';
+    input.name='payload';
+    input.value=JSON.stringify(payload);
+    form.appendChild(input);
+    document.body.appendChild(form);
+    try{ HTMLFormElement.prototype.submit.call(form); }
+    finally{form.remove();}
+  }
   async function sendResult(force=false){
     if(!state||state.stage!=='finished'||!apiReady||(!force&&state.serverStatus==='saved')){updateSyncStatus();return;}
     if(syncingSessionId===state.sessionId&&!force)return;
     const sid=state.sessionId;
     syncingSessionId=sid;
+    lastPostError='';
     state.serverStatus='sending';state.serverError='';save();updateSyncStatus();
     const payload={version:1,exam:'OSZTV-2024-50',sessionId:sid,name:state.name,group:state.group,alias:state.alias||'',attempt:state.attempt,startedAt:state.startedAt,finishedAt:state.finishedAt,finishReason:state.finishReason,departures:state.departures,events:state.events,answers:state.answers,optionOrders:state.optionOrders,queue:state.queue};
     try{
       const health=await jsonpRequest('health');
       if(!health?.ok || health.version!=='OSZTV-2024-SYNC-V2')throw Error('A Google Apps Script régi verziója fut, vagy nem tudja elérni a táblázatot. Frissítsd a Code.gs-t és hozz létre új telepítési verziót. '+(health?.message||''));
-      // A válasz CORS miatt nem olvasható: valódi, szerveroldali igazolás a külön check lekérdezés.
-      try{
-        await fetch(apiUrl,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify(payload),redirect:'follow',cache:'no-store'});
-      }catch(ex){
-        // Böngészők egy része a Google átirányítását hálózati hibának jelzi, ezért
-        // küldünk egy hagyományos iframe-es POST-ot is ugyanazzal az egyedi azonosítóval.
-        const frame=document.getElementById('osztvSubmissionFrame')||document.createElement('iframe');
-        frame.name='osztvSubmissionFrame';frame.id='osztvSubmissionFrame';frame.style.display='none';document.body.appendChild(frame);
-        const f=document.createElement('form');f.action=apiUrl;f.method='POST';f.target=frame.name;f.style.display='none';
-        const input=document.createElement('input');input.name='payload';input.value=JSON.stringify(payload);f.appendChild(input);document.body.appendChild(f);f.submit();f.remove();
-      }
+      // A régi fetch(no-cors) átlátszatlan válasza sikeresnek tűnhetett akkor is,
+      // ha a Google egy bejelentkezési/átirányítási oldalt adott vissza.
+      // Itt MOST mindig valódi HTML form POST történik; a check külön ellenőrzi a mentést.
+      submitResultForm(payload);
       let found=false;
       for(let attempt=0;attempt<12;attempt++){
         if(!state||state.sessionId!==sid)return;
@@ -210,7 +234,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
         if(!verify?.ok)throw Error('Nem sikerült ellenőrizni a beérkezést. '+String(verify?.error||''));
         if(verify.found){state.serverStatus='saved';state.serverScore=verify.score;state.serverError='';save();updateSyncStatus();found=true;break;}
       }
-      if(!found)throw Error('A Google Táblázat 24 másodperc elteltével sem tartalmazza a dolgozatot. Nézd meg a Google Apps Script „Végrehajtások” menüjében a hibát.');
+      if(!found)throw Error(lastPostError || 'A Google Táblázat nem igazolta a beküldést. Nyisd meg az Apps Script → Végrehajtások részt: ha nincs doPost, a kérés nem érkezik meg. Ha van hibás doPost, annak részlete adja az okot.');
     }catch(ex){
       if(state?.sessionId===sid&&state.serverStatus!=='saved'){
         state.serverStatus='error';state.serverError=String(ex.message||ex);save();updateSyncStatus();
@@ -220,7 +244,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
   window.addEventListener('message',e=>{
     if(!/^https:\/\/(?:[a-z0-9-]+\.)?(?:googleusercontent\.com|script\.google\.com)$/.test(e.origin))return;
     const d=e.data;if(!d||d.channel!=='OSZTV_2024_SYNC'||d.sessionId!==state?.sessionId)return;
-    if(!d.ok){state.serverError=String(d.error||'Ismeretlen Apps Script hiba');state.serverStatus='error';save();updateSyncStatus();}
+    if(!d.ok){lastPostError=String(d.error||'Ismeretlen Apps Script hiba');state.serverError=lastPostError;state.serverStatus='error';save();updateSyncStatus();}
     // A tényleges mentést mindig a külön check végpont igazolja.
   });
   function loadLeaderboard(){
