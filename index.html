@@ -150,7 +150,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
     return `<header class="topbar"><div class="brand"><div class="brand-logo">50</div><div><div class="brand-name">OSZTV <span style="color:var(--cyan)">2024</span></div><div class="brand-tagline">Informatikai tudáspróba</div></div></div><div class="top-pill"><span class="dot"></span>${escapeHTML(status)}</div></header>`;
   }
   const apiUrl = String(window.OSZTV_API_URL||'').trim();
-  const apiReady = /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/.test(apiUrl);
+  const apiReady = /^https:\/\/script\.google\.com\/(?:macros\/s|a\/macros\/[^/?#]+\/s)\/[^/?#]+\/exec(?:\?[^#]*)?$/.test(apiUrl);
   function updateSyncStatus(){
     const el=$('syncStatus'); if(!el||!state)return;
     const status=state.serverStatus||'pending';
@@ -168,7 +168,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
   }
   function jsonpRequest(action, parameters={}, timeoutMs=9000){
     return new Promise((resolve,reject)=>{
-      if(!apiReady){reject(Error('Hiányzik az Apps Script /exec URL.'));return;}
+      if(!apiReady){reject(Error('Az Apps Script /exec URL hiányzik vagy hibás formátumú.'));return;}
       const callback='osztvLb'+Date.now().toString(36)+Math.random().toString(36).slice(2,9);
       const script=document.createElement('script');let finished=false;
       const clear=()=>{if(finished)return false;finished=true;clearTimeout(timer);script.remove();delete window[callback];return true;};
@@ -281,7 +281,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
     $('leaderboardRefresh').addEventListener('click',loadLeaderboard); loadLeaderboard();
     $('diagnoseApi')?.addEventListener('click',async()=>{
       const el=$('apiDiagnosis');el.textContent='Google-kapcsolat ellenőrzése…';
-      if(!apiReady){el.textContent='A /exec URL nincs beállítva az index.html fájlban.';return;}
+      if(!apiReady){el.textContent='A Google Apps Script /exec URL hiányzik, vagy nem támogatott a cím formátuma az index.html fájlban.';return;}
       try{const response=await jsonpRequest('health');
         el.textContent=response?.version==='OSZTV-2024-SYNC-V2'&&response.ok?'✓ A Google Apps Script új verziója és az eredménytáblázat is elérhető.': 'A kapcsolat nem megfelelő. Ellenőrizd a Code.gs frissítését és az Apps Script új verziójának telepítését. '+String(response?.message||'');
       }catch(ex){el.textContent='Hiba: '+String(ex.message||ex);}
