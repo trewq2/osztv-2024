@@ -514,7 +514,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
   else homepage();
   // A restored browser should honour the next attempt number after an explicit reset.
   const originalLaunch=launch;
-  launch = function(name,group,attempt) {
+  launch = function(name,group,attempt,alias) {
     const next=Number(document.documentElement.dataset.nextAttempt||'0');
     delete document.documentElement.dataset.nextAttempt;
     return originalLaunch(name,group,next||attempt,alias);
