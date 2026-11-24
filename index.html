@@ -149,11 +149,14 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
   function header(status='ONLINE FELMÉRŐ') {
     return `<header class="topbar"><div class="brand"><div class="brand-logo">50</div><div><div class="brand-name">OSZTV <span style="color:var(--cyan)">2024</span></div><div class="brand-tagline">Informatikai tudáspróba</div></div></div><div class="top-pill"><span class="dot"></span>${escapeHTML(status)}</div></header>`;
   }
-  // A Workspace saját /a/macros/domain/s/ címe egyes böngészőkben a POST-ot
-  // bejelentkezési oldalra irányíthatja. Ugyanannak a telepítésnek a publikus útját használjuk.
+  // A Google Workspace a /a/macros/iskola-domain/s/.../exec címet is használja.
+  // A megadott URL az elsődleges, soha nem írjuk át ellenőrzés nélkül.
   const configuredApiUrl = String(window.OSZTV_API_URL||'').trim();
-  const apiUrl = configuredApiUrl.replace(/^https:\/\/script\.google\.com\/a\/macros\/[^/?#]+\/s\//, 'https://script.google.com/macros/s/');
-  const apiReady = /^https:\/\/script\.google\.com\/(?:macros\/s|a\/macros\/[^/?#]+\/s)\/[^/?#]+\/exec(?:\?[^#]*)?$/.test(apiUrl);
+  const normalApiUrl = configuredApiUrl.replace(/^https:\/\/script\.google\.com\/a\/macros\/[^/?#]+\/s\//, 'https://script.google.com/macros/s/');
+  const apiPattern = /^https:\/\/script\.google\.com\/(?:macros\/s|a\/macros\/[^/?#]+\/s)\/[^/?#]+\/exec(?:\?[^#]*)?$/;
+  const apiCandidates = [...new Set([configuredApiUrl,normalApiUrl])].filter(u => apiPattern.test(u));
+  let apiUrl = apiCandidates[0] || '';
+  const apiReady = apiCandidates.length > 0;
   function updateSyncStatus(){
     const el=$('syncStatus'); if(!el||!state)return;
     const status=state.serverStatus||'pending';
@@ -169,19 +172,38 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
       ? 'A Google Táblázat nem igazolta a mentést. '+(error||'Ellenőrizd az Apps Script telepítését, majd próbáld újra.')
       : 'Az eredmény elküldésre vár.';
   }
+  // Többnyire a Workspace és a nyilvános Google URL közül csak az egyik elérhető.
+  // Amelyik a health kérésre valóban válaszol, azt használjuk a POST és check során is.
   function jsonpRequest(action, parameters={}, timeoutMs=9000){
-    return new Promise((resolve,reject)=>{
-      if(!apiReady){reject(Error('Az Apps Script /exec URL hiányzik vagy hibás formátumú.'));return;}
+    if (!apiReady) return Promise.reject(Error('A Google Apps Script /exec URL nincs helyesen beállítva.'));
+    const endpoints = [apiUrl, ...apiCandidates.filter(u=>u!==apiUrl)];
+    const requestOnce = (endpoint) => new Promise((resolve,reject)=>{
       const callback='osztvLb'+Date.now().toString(36)+Math.random().toString(36).slice(2,9);
       const script=document.createElement('script');let finished=false;
       const clear=()=>{if(finished)return false;finished=true;clearTimeout(timer);script.remove();delete window[callback];return true;};
-      const timer=setTimeout(()=>{if(clear())reject(Error('Az Apps Script nem válaszolt. Ellenőrizd, hogy az új verzió telepítve van-e, és a hozzáférés „Bárki”-ra van-e állítva.'));},timeoutMs);
+      const timer=setTimeout(()=>{if(clear())reject(Error('Nem érkezett válasz (időtúllépés).'));},timeoutMs);
       window[callback]=d=>{if(clear())resolve(d);};
-      script.onerror=()=>{if(clear())reject(Error('Nem érhető el a Google Apps Script végpontja.'));};
+      script.onerror=()=>{if(clear())reject(Error('A böngésző nem tudta betölteni a válaszszkriptet.'));};
       const query=new URLSearchParams({action,callback,...parameters,t:String(Date.now())});
-      script.src=apiUrl+(apiUrl.includes('?')?'&':'?')+query.toString();
+      script.src=endpoint+(endpoint.includes('?')?'&':'?')+query.toString();
       document.head.appendChild(script);
     });
+    return (async()=>{
+      const errors=[];
+      for(const endpoint of endpoints){
+        try{
+          const result=await requestOnce(endpoint);
+          // A health sikerét meg kell erősíteni; a többi API-hibát változatlanul visszaadjuk.
+          if(action==='health' && (!result || result.ok!==true)){
+            errors.push('A szerver visszautasította a health kérést: '+String(result?.message||result?.error||'ismeretlen hiba'));
+            continue;
+          }
+          apiUrl=endpoint;
+          return result;
+        }catch(err){errors.push(String(err.message||err));}
+      }
+      throw Error('A Google Apps Script egyik URL-változata sem volt elérhető. Ellenőrizd az Apps Script webalkalmazás „Bárki” hozzáférését, a legújabb telepítési verziót, majd próbáld meg az /exec?action=health&callback=osztvLbTest1234 címet inkognitóban. ('+errors.join(' / ')+')');
+    })();
   }
   let syncingSessionId = '';
   let lastPostError = '';
