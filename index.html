@@ -56,6 +56,22 @@ button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.45;curs
 .lb-table{width:100%;border-collapse:collapse;min-width:460px}.lb-table th,.lb-table td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line)}.lb-table th{color:var(--cyan);font-size:12px}.lb-scroll{overflow:auto}.sync-status{padding:13px 16px;border:1px solid var(--line);border-radius:12px;color:var(--muted);margin:14px 0}.sync-status.ok{border-color:#5abf9a;color:var(--mint)}.sync-status.bad{border-color:#d89559;color:var(--amber)}.leaderboard{margin-top:26px}.leaderboard h2{margin-bottom:8px}.lb-actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.lb-muted{font-size:13px;color:var(--muted)}
 .connection-tools{border:1px solid #3f6a83;background:linear-gradient(125deg,#101e37,#152945);border-radius:16px;padding:16px 20px;margin:22px 0 0;display:grid;grid-template-columns:1fr auto;gap:12px 20px;align-items:center}
 .connection-tools strong{color:#e6fbff;font-size:16px}.connection-tools p{font-size:13px;color:#b6cce5;margin:3px 0 0}.connection-tools .sync-status{grid-column:1/-1;margin:0!important;padding:9px 12px}.connection-tools .btn{white-space:nowrap}@media(max-width:650px){.connection-tools{grid-template-columns:1fr}.connection-tools .btn{width:100%}}
+
+/* Eredménykártyák – kattintható szűrők */
+.results-card{appearance:none;color:inherit;text-align:left;display:block;width:100%;cursor:pointer;transition:border-color .16s,background .16s,transform .16s,box-shadow .16s}
+.results-card:hover{transform:translateY(-2px);border-color:#6adce9;background:#1a3452}
+.results-card[aria-pressed="true"]{border-color:#6adce9;background:#1a334c;box-shadow:inset 0 0 0 1px #6adce9,0 0 0 2px #5dd6e619}
+.results-card:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}
+.results-card .card-action{display:block;color:#94dce8;font-size:11px;font-weight:700;margin-top:9px}
+.review-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin:18px 0 14px}
+.review-toolbar strong{display:block;font-size:16px;color:#d9e9f7}
+.review-toolbar p{font-size:12px;color:var(--muted);margin:4px 0 0}
+.review-toolbar .btn{min-height:39px;padding:9px 13px;font-size:12px;white-space:nowrap}
+.review-status{font-weight:800;font-size:11px;display:inline-block;margin-left:8px}
+.review-status.correct{color:#a2e7bb}.review-status.wrong-answer{color:#ffaaa5}.review-status.unanswered{color:#ffd38b}
+.review-events{border:1px solid #34516c;border-radius:14px;padding:16px;background:#0d1b2f;font-size:13px;color:#c7d9e8}
+.review-events p{margin:0 0 10px}.review-events p:last-child{margin-bottom:0}
+@media(max-width:640px){.review-toolbar{flex-direction:column}.review-toolbar .btn{width:100%}}
 </style>
   <script>
 "use strict";
@@ -91,6 +107,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
   const LIMIT = (DATA.allowedDepartures || 2) + 1;
   const $ = id => document.getElementById(id);
   let state = null;
+  let selectedReviewFilter = 'wrong';
   let lastGuardAt = 0;
   let guardGraceUntil = Date.now() + 1200;
   let pendingWarning = false;
@@ -455,7 +472,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
       const remaining=state.reviewUntil-Date.now();
       const clock=$('reviewClock');
       if (clock && remaining > 0) clock.textContent=formatClock(remaining);
-      if (remaining <= 0 && $('wrongList')) resultsPage();
+      if (remaining <= 0 && $('reviewClock')) resultsPage();
     }
   }
   function guard(reason) {
@@ -519,30 +536,74 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
     const wrong=answered-good;
     return {rows,score,percent:Math.round(score/DATA.maxPoints*100),good,wrong,unanswered:TOTAL-answered,answered};
   }
+  // Kizárólag az eredményképernyő megjelenítési szűrője.
+  // A kiosztott sorrendet minden nézetben az első 50 kérdés első megjelenése adja.
+  function renderReview(filter, scrollToReview=false) {
+    if (!state || state.stage !== 'finished') return;
+    const valid=['correct','wrong','unanswered','departures','all'];
+    selectedReviewFilter=valid.includes(filter)?filter:'wrong';
+    const title=$('reviewTitle'), hint=$('reviewHint'), list=$('reviewList');
+    if (!title || !hint || !list) return;
+    document.querySelectorAll('[data-review-filter]').forEach(card=>{
+      const active=card.dataset.reviewFilter===selectedReviewFilter;
+      card.setAttribute('aria-pressed',String(active));
+      card.classList.toggle('is-selected',active);
+    });
+    const titles={correct:'Helyes válaszok',wrong:'Hibás válaszok',unanswered:'Megválaszolatlan kérdések',departures:'Oldalelhagyási események',all:'Az összes kérdés'};
+    title.textContent=titles[selectedReviewFilter];
+    hint.textContent=selectedReviewFilter==='departures'
+      ? 'A teszt közben rögzített oldalelhagyási események időrendben.'
+      : 'A kérdések a tanulónak kiosztott eredeti sorrendben jelennek meg. Az átugrott kérdés csak egyszer szerepel.';
+    if (selectedReviewFilter==='departures') {
+      list.innerHTML=state.events.length ? state.events.map((entry,i)=>
+        `<article class="review-events"><p><strong>${i+1}. jelzés</strong> · ${dateTime(entry.time)}</p><p>${escapeHTML(entry.event)}</p></article>`
+      ).join('') : '<div class="review-expired">Nem történt oldalelhagyási jelzés a teszt alatt.</div>';
+    } else if (Date.now() >= state.reviewUntil) {
+      list.innerHTML='<div class="review-expired">⏳ Az 5 perces megtekintési idő lejárt. A kérdések és helyes megoldások már nem láthatók. Az eredménylap továbbra is letölthető.</div>';
+    } else {
+      const ordered=state.queue.slice(0,TOTAL)
+        .map((id,idx)=>({q:lookup.get(id),position:idx+1}))
+        .filter(row=>row.q)
+        .map(row=>{
+          const answered=Object.prototype.hasOwnProperty.call(state.answers,row.q.id);
+          return {...row,kind:!answered?'unanswered':state.answers[row.q.id]===row.q.correctOptionId?'correct':'wrong'};
+        });
+      const shown=selectedReviewFilter==='all'?ordered:ordered.filter(row=>row.kind===selectedReviewFilter);
+      const status={correct:'✓ Helyes',wrong:'✕ Hibás',unanswered:'— Megválaszolatlan'};
+      list.innerHTML=shown.length?shown.map(({q,position,kind})=>{
+        const yourAnswer=q.options.find(o=>o.id===state.answers[q.id]);
+        const correctAnswer=q.options.find(o=>o.id===q.correctOptionId);
+        const answerText=kind==='unanswered'
+          ? '<p class="bad">Nem érkezett válasz erre a kérdésre.</p>'
+          : `<p class="${kind==='correct'?'good':'bad'}">A válaszod: <strong>${escapeHTML(yourAnswer?.text||'–')}</strong></p>`;
+        return `<article class="wrong"><div class="wrong-meta">${position}. kérdés a tesztben · ${escapeHTML(sectionName(q.section))}<span class="review-status ${kind==='wrong'?'wrong-answer':kind}">${status[kind]}</span></div><h3>${escapeHTML(q.text)}</h3>${answerText}<p class="good">Helyes válasz: <strong>${escapeHTML(correctAnswer?.text||'–')}</strong></p></article>`;
+      }).join('') : '<div class="review-expired">Ebben a kategóriában nincs kérdés.</div>';
+    }
+    if(scrollToReview) $('reviewPanel')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }
   function resultsPage() {
     if (!state || state.stage!=='finished') return;
     document.body.classList.remove('exam-mode');
     const d=details();
     const remains=state.reviewUntil-Date.now();
     const reviewOpen=remains>0;
-    // Az eredeti, tanulónként véletlenül kiosztott 50 kérdés sorrendje.
-    // A második körben újra feltett kérdések itt az ELSŐ megjelenésük helyén maradnak.
-    const wrongQuestions = state.queue.slice(0, TOTAL)
-      .map((id, firstPosition) => ({q: lookup.get(id), firstPosition: firstPosition + 1}))
-      .filter(({q}) => q && state.answers[q.id] !== q.correctOptionId);
     $('app').innerHTML=`${header('DOLGOZAT LEZÁRVA')}<main class="results-wrap">
       <div class="results-title">Kiértékelés kész</div>
       <div class="results-head"><div><h1>Megérkezett az<br>eredményed.</h1><p style="color:var(--muted);margin:16px 0 0">${escapeHTML(state.name)} · ${escapeHTML(state.group)} · ${dateTime(state.finishedAt)}</p><p style="font-size:12px;color:#9db2c9">Lezárás oka: ${escapeHTML(state.finishReason)}</p></div><div class="score-ring" style="--score:${d.percent}"><div class="score-ring-inner"><strong>${d.percent}%</strong><span>${d.score} / ${DATA.maxPoints} pont</span></div></div></div>
-      <section class="results-cards"><div class="results-card"><strong>${d.good}</strong><span>Helyes válasz</span></div><div class="results-card"><strong>${d.wrong}</strong><span>Hibás válasz</span></div><div class="results-card"><strong>${d.unanswered}</strong><span>Megválaszolatlan</span></div><div class="results-card"><strong>${state.departures}</strong><span>Oldalelhagyási jelzés</span></div></section>
+      <section class="results-cards" aria-label="Eredmény részletei – kattintható szűrők"><button class="results-card" type="button" data-review-filter="correct" aria-pressed="false" aria-controls="reviewList"><strong>${d.good}</strong><span>Helyes válasz</span><span class="card-action">Kattints a megtekintéshez</span></button><button class="results-card" type="button" data-review-filter="wrong" aria-pressed="false" aria-controls="reviewList"><strong>${d.wrong}</strong><span>Hibás válasz</span><span class="card-action">Kattints a megtekintéshez</span></button><button class="results-card" type="button" data-review-filter="unanswered" aria-pressed="false" aria-controls="reviewList"><strong>${d.unanswered}</strong><span>Megválaszolatlan</span><span class="card-action">Kattints a megtekintéshez</span></button><button class="results-card" type="button" data-review-filter="departures" aria-pressed="false" aria-controls="reviewList"><strong>${state.departures}</strong><span>Oldalelhagyási jelzés</span><span class="card-action">Kattints a megtekintéshez</span></button></section>
       <section class="result-panel"><h2>Eredmények témakörönként</h2><div class="breakdown">${d.rows.map(r=>`<div class="breakdown-row"><div class="breakdown-name">${escapeHTML(r.section)}</div><div class="mini-track"><div class="mini-fill" style="width:${100*r.got/r.max}%"></div></div><div class="breakdown-value">${r.points}/${r.maxPoints} p.</div></div>`).join('')}</div></section>
-      <section class="result-panel"><h2>Hibák és helyes válaszok</h2>
-        ${reviewOpen ? `<div class="review-box"><div><strong>✓ A hibajegyzék még megtekinthető</strong><p>A helyes megoldások a befejezéstől számítva 5 percig láthatók.</p></div><div id="reviewClock" class="review-clock">${formatClock(remains)}</div></div>
-        <div id="wrongList" class="wrong-list">${wrongQuestions.length ? wrongQuestions.map(({q, firstPosition},i)=>{const userOpt=q.options.find(o=>o.id===state.answers[q.id]);const good=q.options.find(o=>o.id===q.correctOptionId);return `<article class="wrong"><div class="wrong-meta">${firstPosition}. kérdés a tesztben · ${escapeHTML(sectionName(q.section))} · ${i+1}. hibajegy</div><h3>${escapeHTML(q.text)}</h3><p class="bad">${userOpt ? 'A válaszod: '+escapeHTML(userOpt.text) : 'Nem érkezett válasz erre a kérdésre.'}</p><p class="good">Helyes válasz: <strong>${escapeHTML(good?.text||'–')}</strong></p></article>`;}).join('') : '<div class="review-expired">Hibátlan dolgozat! Mind az 50 kérdésre helyesen válaszoltál.</div>'}</div>` : `<div class="review-expired">⏳ Az 5 perces megtekintési idő lejárt. A hibák és helyes válaszok már nem láthatók. A pontszám és a PDF-eredménylap továbbra is elérhető.</div>`}
+      <section class="result-panel" id="reviewPanel"><h2>Hibák és helyes válaszok</h2>
+        <div class="review-toolbar"><div><strong id="reviewTitle">Hibás válaszok</strong><p id="reviewHint">Kattints fent egy eredménykártyára a szűréshez.</p></div><button type="button" class="btn btn-quiet" id="reviewShowAll">☷ Összes kérdés</button></div>
+        ${reviewOpen ? `<div class="review-box"><div><strong>✓ A válaszok még megtekinthetők</strong><p>A kérdések és helyes megoldások a befejezéstől számított 5 percig láthatók. Válassz egy kártyát.</p></div><div id="reviewClock" class="review-clock">${formatClock(remains)}</div></div>` : `<div class="review-expired">⏳ Az 5 perces megtekintési idő lejárt. A helyes megoldások már nem láthatók. Az oldalelhagyási események továbbra is megtekinthetők.</div>`}
+        <div id="reviewList" class="wrong-list" role="region" aria-live="polite" aria-label="Kiválasztott kérdések"></div>
       </section>
       <section class="result-panel leaderboard"><h2>🏆 2024-es toplista</h2><p class="panel-p">A legjobb és a legalább 60 pontos leggyorsabb teljesítmények. Kizárólag toplistás becenevek láthatók.</p><div class="lb-actions"><button type="button" id="leaderboardRefresh" class="btn btn-quiet">↻ Toplista frissítése</button></div><div id="leaderboardContent" class="sync-status">Toplista betöltése…</div></section><section class="result-panel"><h2>Google Táblázatos mentés</h2><div id="syncStatus" class="sync-status">Eredmény továbbítása a tanár táblázatába…</div><button type="button" id="syncRetry" class="btn btn-quiet">↻ Mentés újrapróbálása</button><p class="lb-muted">Az eredmény csak akkor biztosan megérkezett, ha itt a sikeres mentés visszaigazolása látható.</p></section><section class="result-panel"><h2>Eredménylap továbbítása</h2><p class="panel-p" style="margin:0 0 16px">A PDF-hez kattints az alábbi gombra. A böngésző nyomtatási ablakában a <strong>Cél / Nyomtató</strong> mezőben válaszd a <strong>Mentés PDF-ként</strong> lehetőséget, majd a <strong>Mentés</strong> gombot. A sikeres Google Táblázatos mentést külön visszaigazoljuk. A PDF-et saját célra is elmentheted.</p><div class="results-actions"><button id="pdfButton" class="btn" type="button">⎙ Eredménylap mentése PDF-ként</button><button id="resetButton" class="btn btn-quiet" type="button">↻ Újrapróbálkozás / nullázás</button></div><p class="result-message">Próbálkozás: ${state.attempt}. · Azonosító: ${escapeHTML(state.sessionId)} · A PDF tartalmazza a pontszámot, a témakörök eredményét és az oldalelhagyásokat, de a megoldókulcsot nem.</p></section>
       <div class="notice">A weboldal publikus GitHub Pages-en fut. A Google Apps Script újraszámolja a pontszámot, de a böngészőben végzett munka és az időadatok hitelességét önmagában nem tudja garantálni.</div>
     </main>${footer()}`;
     renderReport();
+    document.querySelectorAll('[data-review-filter]').forEach(card=>card.addEventListener('click',()=>renderReview(card.dataset.reviewFilter,true)));
+    $('reviewShowAll')?.addEventListener('click',()=>renderReview('all',true));
+    renderReview(selectedReviewFilter);
     $('pdfButton').addEventListener('click',pdfDownload);
     $('syncRetry')?.addEventListener('click',()=>sendResult(true));
     $('leaderboardRefresh')?.addEventListener('click',loadLeaderboard);loadLeaderboard();
@@ -552,6 +613,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
       const name=state.name,group=state.group,alias=state.alias,attempt=state.attempt+1;
       try { localStorage.removeItem(STORAGE); } catch (e) { console.warn("A helyi tárolás nem érhető el.", e); }
       state=null;
+      selectedReviewFilter='wrong';
       homepage();
       $('studentName').value=name;$('studentClass').value=group;$('studentAlias').value=alias||'';
       $('honorRules').checked=false;
