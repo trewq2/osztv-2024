@@ -62,7 +62,7 @@ window.OSZTV_EXAM = {"exam":"OSZTV 2024 – 50 kérdéses tudáspróba","source"
   
 <script>
 /* TANÁRI BEÁLLÍTÁS: ide illeszd be a telepített Apps Script Web App /exec címét. */
-window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AKfycbyIrswMRjoUwknZlCxXV0QgU5aXIT15SCZ9XSBQ4qcpM4_TmlXjk2Xj8sY5HeX-Chn_/exec";
+window.OSZTV_API_URL = "IDE_ILLESZD_A_GOOGLE_APPS_SCRIPT_EXEC_URLT";
 </script>
 </head>
 <body>
@@ -514,7 +514,7 @@ window.OSZTV_API_URL = "https://script.google.com/a/macros/palfy-vizugyi.hu/s/AK
   else homepage();
   // A restored browser should honour the next attempt number after an explicit reset.
   const originalLaunch=launch;
-  launch = function(name,group,attempt,alias) {
+  launch = function(name,group,attempt) {
     const next=Number(document.documentElement.dataset.nextAttempt||'0');
     delete document.documentElement.dataset.nextAttempt;
     return originalLaunch(name,group,next||attempt,alias);
